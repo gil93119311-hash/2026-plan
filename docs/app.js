@@ -390,7 +390,7 @@
 
   // ---------- 음성 입력 ----------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recog = null, parsedItems = [];
+  let parsedItems = [];
   $('#micFab').onclick = openVoice;
   function openVoice() {
     showSheet('#voiceSheet');
@@ -398,39 +398,87 @@
     $('#textInput').value = '';
     startListening();
   }
+  // 최대 20초 동안 듣기: 브라우저가 중간에 끊어도 자동으로 다시 이어서 들어요
+  const LISTEN_MS = 20000;
+  let session = null;
   function startListening() {
     $('#listenBox').hidden = false;
-    const tr = $('#transcript'), pulse = $('#pulse');
+    const tr = $('#transcript'), pulse = $('#pulse'), cd = $('#countdown'), stopBtn = $('#stopVoice');
     if (!SR) {
-      pulse.className = 'pulse off';
+      pulse.className = 'pulse off'; stopBtn.hidden = true; cd.textContent = '';
       tr.textContent = '이 브라우저는 음성 인식을 지원하지 않아요. 키보드의 🎤 마이크로 아래 칸에 말해 주세요.';
       setTimeout(() => $('#textInput').focus(), 200);
       return;
     }
-    try { recog && recog.abort(); } catch (e) { /* ignore */ }
-    recog = new SR();
-    recog.lang = 'ko-KR'; recog.interimResults = true; recog.continuous = false; recog.maxAlternatives = 1;
-    let finalText = '';
-    tr.textContent = '듣고 있어요… 말씀하세요';
-    pulse.className = 'pulse on';
-    recog.onresult = (ev) => {
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript; else interim += ev.results[i][0].transcript;
-      }
-      tr.textContent = (finalText + interim) || '…';
+    stopListening(false);
+    const ss = session = { text: '', interim: '', stopped: false, until: Date.now() + LISTEN_MS, fatal: false };
+    tr.textContent = '듣고 있어요… 천천히 말씀하세요';
+    pulse.className = 'pulse on'; stopBtn.hidden = false;
+    const tick = () => {
+      if (ss.stopped) return;
+      const left = Math.max(0, Math.ceil((ss.until - Date.now()) / 1000));
+      cd.textContent = `${left}초 남음`;
+      if (left <= 0) stopListening(true);
     };
-    recog.onerror = (ev) => {
-      pulse.className = 'pulse off';
-      tr.textContent = ev.error === 'not-allowed' || ev.error === 'service-not-allowed' ? '마이크 권한을 허용해 주세요. (또는 아래 칸에 입력)' : ev.error === 'no-speech' ? '말소리가 안 들렸어요. 다시 말하기를 눌러 주세요.' : '음성 인식 오류: ' + ev.error;
+    ss.timer = setInterval(tick, 250); tick();
+    const run = () => {
+      if (ss.stopped) return;
+      const r = ss.rec = new SR();
+      r.lang = 'ko-KR'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+      let part = '';
+      r.onresult = (ev) => {
+        let interim = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) part += ev.results[i][0].transcript + ' '; else interim += ev.results[i][0].transcript;
+        }
+        ss.interim = interim; ss.part = part;
+        tr.textContent = (ss.text + part + interim).trim() || '…';
+      };
+      r.onerror = (ev) => {
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed' || ev.error === 'audio-capture') {
+          ss.fatal = true;
+          tr.textContent = '마이크 권한을 허용해 주세요. (또는 아래 칸에 입력)';
+        }
+      };
+      r.onend = () => {
+        // 끊기기 직전의 미확정 문장도 버리지 않음
+        ss.text += part + (ss.interim ? ss.interim + ' ' : ''); ss.interim = ''; ss.part = '';
+        if (ss.done) return;
+        if (ss.fatal) { finishListening(ss, false); return; }
+        if (ss.stopped) { finishListening(ss, true); return; }
+        if (Date.now() < ss.until) setTimeout(run, 150); // 시간이 남았으면 다시 듣기
+        else finishListening(ss, true);
+      };
+      try { r.start(); } catch (e) { tr.textContent = '음성 인식을 시작할 수 없어요'; finishListening(ss, false); }
     };
-    recog.onend = () => {
-      pulse.className = 'pulse off';
-      if (finalText.trim()) { $('#textInput').value = finalText.trim(); interpret(finalText); }
-    };
-    try { recog.start(); } catch (e) { tr.textContent = '음성 인식을 시작할 수 없어요'; }
+    run();
   }
-  $('#textForm').onsubmit = (e) => { e.preventDefault(); try { recog && recog.abort(); } catch (er) { /* */ } const v = $('#textInput').value; if (v.trim()) interpret(v); $('#textInput').blur(); };
+  // 듣기 끝내기 (useResult=true면 들은 말을 해석)
+  function stopListening(useResult) {
+    const ss = session; if (!ss || ss.stopped) return;
+    ss.stopped = true;
+    if (useResult) {
+      // stop()은 마지막 말까지 확정한 뒤 onend 호출 → finishListening
+      try { ss.rec.stop(); } catch (e) { finishListening(ss, true); }
+      setTimeout(() => finishListening(ss, true), 1500); // onend가 안 오면 대비
+    } else {
+      ss.done = true; clearInterval(ss.timer);
+      try { ss.rec && ss.rec.abort(); } catch (e) { /* */ }
+      resetListenUI();
+    }
+  }
+  function resetListenUI() { $('#pulse').className = 'pulse off'; $('#stopVoice').hidden = true; $('#countdown').textContent = ''; }
+  function finishListening(ss, useResult) {
+    if (ss.done) return; ss.done = true; ss.stopped = true;
+    clearInterval(ss.timer);
+    resetListenUI();
+    if (!useResult) return;
+    const text = (ss.text + (ss.part || '') + (ss.interim || '')).replace(/\s+/g, ' ').trim();
+    if (text) { $('#textInput').value = text; interpret(text); }
+    else $('#transcript').textContent = '말소리가 안 들렸어요. 다시 말하기를 눌러 주세요.';
+  }
+  $('#stopVoice').onclick = () => stopListening(true);
+  $('#textForm').onsubmit = (e) => { e.preventDefault(); stopListening(false); const v = $('#textInput').value; if (v.trim()) interpret(v); $('#textInput').blur(); };
   $('#retryVoice').onclick = () => { parsedItems = []; renderParsed(); startListening(); };
   function interpret(text) {
     parsedItems = P.parse(text, { now: new Date(), cards: S.cards, defaultCardId: S.settings.defaultCardId });
@@ -580,7 +628,7 @@
 
   // ---------- 시트/토스트 ----------
   function showSheet(sel) { $$('.sheet').forEach((s) => s.hidden = true); $(sel).hidden = false; bindClose(); }
-  function closeSheets() { $$('.sheet').forEach((s) => s.hidden = true); try { recog && recog.abort(); } catch (e) { /* */ } }
+  function closeSheets() { $$('.sheet').forEach((s) => s.hidden = true); stopListening(false); }
   function bindClose() { $$('[data-close]').forEach((b) => b.onclick = closeSheets); }
   $$('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s) closeSheets(); }));
   let tt;

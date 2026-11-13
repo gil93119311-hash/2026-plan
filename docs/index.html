@@ -50,7 +50,9 @@
       <div id="listenBox" class="listen">
         <div class="pulse" id="pulse"></div>
         <p id="transcript" class="transcript">듣고 있어요… 말씀하세요</p>
-        <p class="hint">예) “어제 점심 신한카드로 김치찌개 9천원”<br>“25일 카드값 120만원 나갈 예정” · “매달 25일 월세 50만원”</p>
+        <p id="countdown" class="countdown"></p>
+        <button type="button" id="stopVoice" class="btn primary stop-btn" hidden>말 다 했어요 ✓</button>
+        <p class="hint">예) “어제 점심 신한카드로 김치찌개 9천원”<br>“25일 카드값 120만원 나갈 예정” · “매달 25일 월세 50만원”<br>최대 20초까지 들어요. 여러 건은 “그리고”로 이어 말하세요.</p>
       </div>
       <form id="textForm" class="text-form">
         <input id="textInput" type="text" placeholder="말 대신 입력해도 돼요" autocomplete="off" enterkeyhint="done">

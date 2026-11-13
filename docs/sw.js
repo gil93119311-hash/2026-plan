@@ -1,5 +1,5 @@
 /* 말로 가계부 서비스워커: 오프라인 캐시 + 백그라운드 알림 */
-const VERSION = 'malro-v1';
+const VERSION = 'malro-v2';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'parser.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
