@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>말로 가계부</title>
+  <meta name="description" content="말로 기록하는 가계부 – 지출, 지출 예정, 고정지출 알림, 기간별 결산">
+  <meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1a17" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="말로 가계부">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="title-wrap">
+      <h1 id="pageTitle">다이어리</h1>
+      <div id="pageSub" class="sub"></div>
+    </div>
+    <button id="installBtn" class="chip ghost" hidden>홈 화면에 추가</button>
+  </header>
+
+  <main id="view"></main>
+
+  <!-- 음성 입력 버튼 -->
+  <button id="micFab" class="mic-fab" aria-label="말로 기록하기">
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path fill="currentColor" d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Zm6-3.5a1 1 0 1 1 2 0 8 8 0 0 1-7 7.94V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-1.56a8 8 0 0 1-7-7.94 1 1 0 1 1 2 0 6 6 0 0 0 12 0Z"/></svg>
+  </button>
+
+  <nav class="tabbar">
+    <button data-tab="diary" class="active"><span>📔</span>다이어리</button>
+    <button data-tab="report"><span>📊</span>결산</button>
+    <span class="tab-gap"></span>
+    <button data-tab="schedule"><span>⏰</span>일정·알림</button>
+    <button data-tab="settings"><span>⚙️</span>설정</button>
+  </nav>
+
+  <!-- 음성 입력 시트 -->
+  <div id="voiceSheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <strong>말로 기록하기</strong>
+        <button class="x" data-close aria-label="닫기">✕</button>
+      </div>
+      <div id="listenBox" class="listen">
+        <div class="pulse" id="pulse"></div>
+        <p id="transcript" class="transcript">듣고 있어요… 말씀하세요</p>
+        <p class="hint">예) “어제 점심 신한카드로 김치찌개 9천원”<br>“25일 카드값 120만원 나갈 예정” · “매달 25일 월세 50만원”</p>
+      </div>
+      <form id="textForm" class="text-form">
+        <input id="textInput" type="text" placeholder="말 대신 입력해도 돼요" autocomplete="off" enterkeyhint="done">
+        <button type="submit" class="btn">해석</button>
+      </form>
+      <div id="parsedList"></div>
+      <div class="sheet-actions" id="parsedActions" hidden>
+        <button class="btn ghost" id="retryVoice">다시 말하기</button>
+        <button class="btn primary" id="saveParsed">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 편집 시트 -->
+  <div id="editSheet" class="sheet" hidden>
+    <div class="sheet-card" id="editCard"></div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
