@@ -24,6 +24,8 @@
     bill: { name: '공과금·관리비', icon: '🧾' },
     insurance: { name: '보험', icon: '🛡️' },
     sub: { name: '구독', icon: '🔁' },
+    lease: { name: '리스', icon: '🚗' },
+    pay: { name: '급여·인건비', icon: '👤' },
     etc: { name: '기타 고정지출', icon: '📌' },
   };
   const catIcon = (name) => (P.CATEGORIES.find((c) => c.name === name) || { icon: '📝' }).icon;
@@ -73,14 +75,18 @@
         const date = occDate(s, y, m);
         if (date >= from && date <= to && (!s.start || date >= s.start)) {
           const paid = paidEntry(s, date);
-          const est = !s.amount && s.kind === 'card';
-          out.push({ key: `${s.id}|${date}`, s, date, amount: paid ? paid.amount : (s.amount || (est ? estimateCard(s, date) : 0)), estimated: est && !paid, paid });
+          const ov = s.overrides && s.overrides[date] != null ? s.overrides[date] : null;
+          const est = !s.amount && s.kind === 'card' && ov === null && !paid;
+          const amount = paid ? paid.amount : ov !== null ? ov : (s.amount || (est ? estimateCard(s, date) : 0));
+          out.push({ key: `${s.id}|${date}`, s, date, amount, estimated: est, unknown: est && !amount, paid });
         }
         m++; if (m > 11) { m = 0; y++; }
       }
     }
     return out.sort((x, y) => x.date.localeCompare(y.date));
   }
+  const occText = (o) => o.unknown ? '금액 미정' : (o.estimated ? '약 ' : '') + won(o.amount);
+  const manwon = (n) => { n = Math.round(n || 0); const e = Math.floor(n / 1e8), m = Math.round((n % 1e8) / 1e4); return (e ? e + '억' : '') + (m ? m.toLocaleString('ko-KR') + '만' : (e ? '' : '0')) + '원'; };
   function plannedEntries(from, to) {
     return S.entries.filter((e) => e.type === 'planned' && e.date >= from && e.date <= to);
   }
@@ -100,7 +106,7 @@
     const items = [];
     for (const o of occurrences(ymd(addDays(new Date(), -3)), end)) {
       if (o.paid) continue;
-      items.push({ date: o.date, name: o.s.name, amount: o.amount, icon: KINDS[o.s.kind]?.icon || '📌', est: o.estimated });
+      items.push({ date: o.date, name: o.s.name, amount: o.amount, icon: KINDS[o.s.kind]?.icon || '📌', txt: occText(o) });
     }
     for (const e of plannedEntries(ymd(addDays(new Date(), -3)), end)) items.push({ date: e.date, name: e.title, amount: e.amount, icon: catIcon(e.category) });
     return items.sort((a, b) => a.date.localeCompare(b.date)).map((x) => ({ ...x, dd: Math.round((parseD(x.date) - parseD(t)) / 864e5) }));
@@ -136,7 +142,7 @@
     }
     const alerts = upcomingAlerts();
     const alertHTML = alerts.length ? `<div class="section-title">곧 나갈 돈 <span style="font-weight:500;font-size:12px">10일 이내</span></div>
-      <div class="alert-strip">${alerts.map((a) => `<div class="alert-pill ${a.dd <= 1 ? 'due' : ''}"><span class="d">${ddLabel(a.dd)} · ${+a.date.slice(5, 7)}/${+a.date.slice(8)}</span><span class="n">${a.icon} ${esc(a.name)}</span><span class="a num">${a.est ? '약 ' : ''}${won(a.amount)}</span></div>`).join('')}</div>` : '';
+      <div class="alert-strip">${alerts.map((a) => `<div class="alert-pill ${a.dd <= 1 ? 'due' : ''}"><span class="d">${ddLabel(a.dd)} · ${+a.date.slice(5, 7)}/${+a.date.slice(8)}</span><span class="n">${a.icon} ${esc(a.name)}</span><span class="a num">${a.txt || won(a.amount)}</span></div>`).join('')}</div>` : '';
 
     $('#view').innerHTML = `
       ${alertHTML}
@@ -163,7 +169,7 @@
     const occ = occurrences(ds, ds).filter((o) => !o.paid);
     const exp = list.filter((e) => e.type === 'expense').reduce((a, e) => a + e.amount, 0);
     const rows = [
-      ...occ.map((o) => ({ time: o.s.time || '09:00', html: `<button class="entry sched" data-occ="${esc(o.key)}"><span class="t">${esc(o.s.time || '')}</span><span class="ic">${KINDS[o.s.kind]?.icon || '📌'}</span><span class="body"><div class="ti">${esc(o.s.name)}</div><div class="meta"><span class="tag warn">고정지출 예정</span>${o.s.cardId ? cardTag(o.s.cardId) : ''}</div></span><span class="am num">${o.estimated ? '약 ' : ''}${won(o.amount)}</span></button>` })),
+      ...occ.map((o) => ({ time: o.s.time || '09:00', html: `<button class="entry sched" data-occ="${esc(o.key)}"><span class="t">${esc(o.s.time || '')}</span><span class="ic">${KINDS[o.s.kind]?.icon || '📌'}</span><span class="body"><div class="ti">${esc(o.s.name)}</div><div class="meta"><span class="tag warn">고정지출 예정</span>${o.s.cardId ? cardTag(o.s.cardId) : ''}</div></span><span class="am num">${occText(o)}</span></button>` })),
       ...list.map((e) => ({ time: e.time, html: entryRow(e) })),
     ].sort((a, b) => a.time.localeCompare(b.time));
     return `<div class="diary-head"><div class="diary-date">${d.getMonth() + 1}월 ${d.getDate()}일<small>${DOW[d.getDay()]}요일${ds === today() ? ' · 오늘' : ''}</small></div>
@@ -279,28 +285,65 @@
       const name = it.kind === 'occ' ? `${KINDS[it.o.s.kind]?.icon || '📌'} ${esc(it.o.s.name)}` : `${catIcon(it.e.category)} ${esc(it.e.title)}`;
       const card = it.kind === 'occ' ? it.o.s.cardId : it.e.cardId;
       const amount = it.kind === 'occ' ? it.o.amount : it.e.amount;
-      const est = it.kind === 'occ' && it.o.estimated;
       const attr = it.kind === 'occ' ? `data-occ="${esc(it.o.key)}"` : `data-entry="${it.e.id}"`;
       return `<div class="sched-item"><div class="dday ${cls}">${ddText}<small>${d.getMonth() + 1}/${d.getDate()} ${DOW[d.getDay()]}</small></div>
         <div><div class="nm">${name}</div><div class="mt">${it.kind === 'occ' ? (KINDS[it.o.s.kind]?.name || '') : '지출할 것'}${card ? ' · ' + esc(cardName(card)) : ''}</div></div>
-        <div class="rt"><b class="num">${est ? '약 ' : ''}${won(amount)}</b>${paid ? '' : `<button class="btn small" ${attr}>${dd <= 0 ? '처리' : '보기'}</button>`}</div></div>`;
+        <div class="rt"><b class="num">${it.kind === 'occ' ? occText(it.o) : won(amount)}</b>${paid ? '' : `<button class="btn small" ${attr}>${dd <= 0 ? '처리' : '보기'}</button>`}</div></div>`;
     }).join('');
-    const monthly = S.schedules.reduce((a, s) => a + (s.active === false ? 0 : (s.amount || 0)), 0);
+    const act = S.schedules.filter((x) => x.active !== false);
+    const monthly = act.reduce((a, x) => a + (x.amount || 0), 0);
+    const debtTotal = act.reduce((a, x) => a + (x.debt || 0), 0);
+    const ORDER = ['card', 'rent', 'pay', 'lease', 'loan', 'bill', 'insurance', 'sub', 'etc'];
+    const groups = ORDER.map((k) => ({ k, list: S.schedules.filter((x) => (KINDS[x.kind] ? x.kind : 'etc') === k).sort((a, b) => a.day - b.day) })).filter((g) => g.list.length);
+    const nextOcc = (x) => occurrences(today(), ymd(addDays(new Date(), 62))).find((o) => o.s.id === x.id);
+    const fixedHTML = groups.map((g) => {
+      const sum = g.list.reduce((a, x) => a + (x.active === false ? 0 : (x.amount || 0)), 0);
+      const debt = g.list.reduce((a, x) => a + (x.debt || 0), 0);
+      return `<div class="grp-head"><b>${KINDS[g.k].icon} ${KINDS[g.k].name}</b><span class="num">${g.k === 'card' ? '' : '월 ' + manwon(sum)}${debt ? ` · 잔액 ${manwon(debt)}` : ''}</span></div>` + g.list.map((x) => {
+        const no = g.k === 'card' ? nextOcc(x) : null;
+        const right = g.k === 'card' ? (no ? occText(no) : '-') : (x.amount ? won(x.amount) : '-');
+        return `<button class="fixed-item" data-sched="${x.id}">
+          <span><b>${esc(x.name)}</b><br><span class="mt" style="font-size:12px;color:var(--ink-2)">매달 ${x.day >= 31 ? '말일' : x.day + '일'}${x.cardId ? ' · ' + esc(cardName(x.cardId)) : ''}${x.debt ? ' · 잔액 ' + manwon(x.debt) : ''}${no ? ` · 다음 ${+no.date.slice(5, 7)}/${+no.date.slice(8)}` : ''}${x.active === false ? ' · <b>꺼짐</b>' : ''}</span></span>
+          <b class="num">${right}</b></button>`;
+      }).join('');
+    }).join('');
     $('#view').innerHTML = `
       ${notifyBanner()}
       <div class="section-title">다가오는 지출 <span style="font-weight:500;font-size:12px">45일</span></div>
       <div class="paper list">${rows || '<div class="empty">예정된 지출이 없어요.<br>“25일 카드값 120만원 나갈 예정”처럼 말해 보세요.</div>'}</div>
-      <div class="section-title">매달 고정지출 <span class="num" style="font-size:13px">월 ${won(monthly)}</span></div>
-      <div class="paper list">${S.schedules.length ? S.schedules.slice().sort((a, b) => a.day - b.day).map((s) => `<button class="fixed-item" data-sched="${s.id}">
-          <span><b>${KINDS[s.kind]?.icon || '📌'} ${esc(s.name)}</b><br><span class="mt" style="font-size:12px;color:var(--ink-2)">매달 ${s.day >= 31 ? '말일' : s.day + '일'} · ${s.cardId ? esc(cardName(s.cardId)) + ' · ' : ''}${s.remind.map((n) => n === 0 ? '당일' : n + '일 전').join(', ')} 알림${s.active === false ? ' · <b>꺼짐</b>' : ''}</span></span>
-          <b class="num">${s.amount ? won(s.amount) : (s.kind === 'card' ? '자동 추정' : '-')}</b></button>`).join('') : '<div class="empty">“매달 25일 월세 50만원”처럼 말하거나<br>아래 버튼으로 추가하세요.</div>'}</div>
+      ${cardStatusHTML()}
+      <div class="section-title">매달 고정지출 <span class="num" style="font-size:13px">월 ${manwon(monthly)} (카드 제외)</span></div>
+      ${debtTotal ? `<div class="paper kpi" style="margin-bottom:10px"><div class="l">남은 채무·대출 잔액 합계</div><div class="v num" style="color:var(--plan)">${manwon(debtTotal)}</div></div>` : ''}
+      <div class="paper list">${fixedHTML || '<div class="empty">“매달 25일 월세 50만원”처럼 말하거나<br>아래 버튼으로 추가하세요.</div>'}</div>
       <div class="sheet-actions"><button class="btn" id="addSched">＋ 고정지출 추가</button><button class="btn" id="addPlan">＋ 지출할 것 추가</button></div>
-      <p class="note">💳 카드 결제일 금액을 비워 두면 지난달 그 카드로 쓴 금액으로 자동 추정해요.</p>`;
+      <p class="note">💳 카드 결제일은 항목을 눌러 회차마다 금액을 넣을 수 있어요. 안 넣으면 지난달 그 카드로 기록한 금액으로 추정해요.</p>`;
+    $$('[data-card]').forEach((b) => b.onclick = () => openCardEditor(cardById(b.dataset.card)));
     bindEntryClicks();
     $$('[data-sched]').forEach((b) => b.onclick = () => openScheduleEditor(S.schedules.find((s) => s.id === b.dataset.sched)));
     $('#addSched').onclick = () => openScheduleEditor(null);
     $('#addPlan').onclick = () => openEntryEditor({ id: null, type: 'planned', amount: 0, date: ymd(addDays(new Date(), 1)), time: '09:00', cardId: S.settings.defaultCardId, category: '기타', title: '' });
     const nb = $('#notifyBtn'); if (nb) nb.onclick = enableNotifications;
+  }
+  // 카드 현황: 한도·사용·남은 한도·카드금융
+  function cardStatusHTML() {
+    const cs = S.cards.filter((c) => c.limit);
+    if (!cs.length) return '';
+    const tot = cs.reduce((a, c) => ({ limit: a.limit + c.limit, used: a.used + (c.limitUsed || 0), loan: a.loan + (c.loanAmt || 0), usage: a.usage + (c.usage || 0) }), { limit: 0, used: 0, loan: 0, usage: 0 });
+    const asOf = cs.map((c) => c.asOf).filter(Boolean).sort().pop();
+    return `<div class="section-title">카드 현황 <span style="font-weight:500;font-size:12px">${asOf ? +asOf.slice(5, 7) + '/' + +asOf.slice(8) + ' 기준' : ''}</span></div>
+      <div class="paper list">
+        <div class="card-tot"><div><span>총 사용</span><b class="num">${manwon(tot.usage)}</b></div><div><span>카드금융</span><b class="num">${manwon(tot.loan)}</b></div><div><span>남은 한도</span><b class="num">${manwon(tot.limit - tot.used)}</b></div></div>
+        ${cs.map((c) => {
+          const left = c.limit - (c.limitUsed || 0); const pct = Math.min(100, (c.limitUsed || 0) / c.limit * 100);
+          const sch = S.schedules.find((x) => x.kind === 'card' && x.cardId === c.id);
+          const no = sch && occurrences(today(), ymd(addDays(new Date(), 62))).find((o) => o.s.id === sch.id);
+          return `<button class="card-row" data-card="${c.id}">
+            <div class="cr-top"><b><i class="card-swatch" style="background:${esc(c.color)}"></i>${esc(c.name)}</b><span class="num">${no ? `결제 ${+no.date.slice(5, 7)}/${+no.date.slice(8)} · <b>${occText(no)}</b>` : ''}</span></div>
+            <div class="bar-track"><span class="bar-fill" style="display:block;width:${Math.max(1, pct)}%;background:${pct >= 90 ? '#d0453a' : esc(c.color)}"></span></div>
+            <div class="cr-meta num"><span>사용 ${manwon(c.usage || 0)}${c.loanAmt ? ` · ${esc(c.loanType || '카드금융')} ${manwon(c.loanAmt)}` : ''}${c.rate ? ` · 금리 ${c.rate}%` : ''}</span><span class="${left < c.limit * 0.1 ? 'up' : ''}">남은 한도 <b>${manwon(left)}</b> / ${manwon(c.limit)}</span></div>
+          </button>`;
+        }).join('')}
+      </div>`;
   }
   function notifyBanner() {
     if (!('Notification' in window)) return `<div class="paper set-row"><div>🔔 이 브라우저는 알림을 지원하지 않아요.<div class="d">설정 → 캘린더로 내보내기를 쓰면 휴대폰 캘린더가 알려줘요.</div></div></div>`;
@@ -550,10 +593,16 @@
     const d = parseD(date);
     card.innerHTML = `<div class="sheet-head"><strong>${KINDS[s.kind]?.icon || ''} ${esc(s.name)}</strong><button class="x" data-close>✕</button></div>
       <p style="margin:4px 0 12px;color:var(--ink-2)">${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]}) · ${KINDS[s.kind]?.name}${s.cardId ? ' · ' + esc(cardName(s.cardId)) : ''}</p>
-      <div class="form-grid"><label class="full">이번 달 실제 금액${o && o.estimated ? ' (지난달 카드 사용액으로 추정)' : ''}<input type="number" inputmode="numeric" id="occAmt" value="${o ? o.amount : s.amount}"></label></div>
-      <div class="sheet-actions"><button class="btn" id="editS">고정지출 설정</button><button class="btn primary" id="payS">납부 완료로 기록</button></div>`;
+      <div class="form-grid"><label class="full">이번 달 실제 금액${o && o.estimated ? ' (지난달 카드 사용액으로 추정)' : ''}<input type="number" inputmode="numeric" id="occAmt" value="${o && o.amount ? o.amount : (s.amount || '')}" placeholder="금액"></label></div>
+      <div class="sheet-actions"><button class="btn" id="ovS">이번 금액만 저장</button><button class="btn primary" id="payS">납부 완료로 기록</button></div>
+      <div class="sheet-actions"><button class="btn ghost" id="editS">고정지출 설정 바꾸기</button></div>`;
     bindClose();
     $('#editS').onclick = () => openScheduleEditor(s);
+    $('#ovS').onclick = () => {
+      const amt = Math.round(+$('#occAmt').value || 0);
+      s.overrides = s.overrides || {}; s.overrides[date] = amt;
+      save(); closeSheets(); toast(`${d.getMonth() + 1}월 금액을 저장했어요`); render();
+    };
     $('#payS').onclick = () => {
       const amt = Math.round(+$('#occAmt').value || 0);
       if (!amt) { toast('금액을 입력해 주세요'); return; }
@@ -575,6 +624,7 @@
         <label class="full">금액 <span style="font-size:11px">(카드 결제일은 비워두면 자동 추정)</span><input type="number" inputmode="numeric" name="amount" value="${it.amount || ''}" placeholder="0"></label>
         <label>결제 카드/계좌<select name="cardId">${cardOptions(it.cardId)}</select></label>
         <label>분류<select name="category">${catOptions(it.category)}</select></label>
+        <label class="full">남은 채무·대출 잔액 <span style="font-size:11px">(있으면)</span><input type="number" inputmode="numeric" name="debt" value="${it.debt || ''}" placeholder="0"></label>
         <label class="full">알림 받을 때<div class="remind-days">${REMIND_CHOICES.map((n) => `<button type="button" class="chip ${it.remind.includes(n) ? 'on' : ''}" data-rd="${n}">${n === 0 ? '당일' : n + '일 전'}</button>`).join('')}</div></label>
         <label>알림 시각<input type="time" name="time" value="${it.time}"></label>
         <label>사용<select name="active"><option value="1" ${it.active !== false ? 'selected' : ''}>켜기</option><option value="0" ${it.active === false ? 'selected' : ''}>끄기</option></select></label>
@@ -582,10 +632,10 @@
       <div class="sheet-actions">${s ? '<button class="btn danger" id="delS">삭제</button>' : ''}<button class="btn primary" id="saveS">저장</button></div>`;
     bindClose();
     $$('[data-rd]').forEach((b) => b.onclick = () => { const n = +b.dataset.rd; it.remind = it.remind.includes(n) ? it.remind.filter((x) => x !== n) : [...it.remind, n].sort((a, b) => b - a); b.classList.toggle('on'); });
-    $('[name=kind]').onchange = (e) => { const k = e.target.value; if (!$('[name=name]').value) $('[name=name]').value = KINDS[k].name; $('[name=category]').value = { card: '금융·대출', loan: '금융·대출', rent: '주거·관리비', bill: '주거·관리비', insurance: '금융·대출', sub: '문화·여가' }[k] || '기타'; };
+    $('[name=kind]').onchange = (e) => { const k = e.target.value; if (!$('[name=name]').value) $('[name=name]').value = KINDS[k].name; $('[name=category]').value = { card: '금융·대출', loan: '금융·대출', rent: '주거·관리비', bill: '주거·관리비', insurance: '금융·대출', sub: '문화·여가', lease: '교통' }[k] || '기타'; };
     $('#saveS').onclick = () => {
       const f = $('#sf'); const g = (n) => f.querySelector(`[name=${n}]`).value;
-      Object.assign(it, { name: g('name').trim() || KINDS[g('kind')].name, kind: g('kind'), day: +g('day'), amount: Math.round(+g('amount') || 0), cardId: g('cardId') || null, category: g('category'), time: g('time') || '09:00', active: g('active') === '1' });
+      Object.assign(it, { name: g('name').trim() || KINDS[g('kind')].name, kind: g('kind'), day: +g('day'), amount: Math.round(+g('amount') || 0), cardId: g('cardId') || null, category: g('category'), time: g('time') || '09:00', active: g('active') === '1', debt: Math.round(+g('debt') || 0) });
       if (!it.amount && it.kind !== 'card') { toast('금액을 입력해 주세요'); return; }
       if (s) Object.assign(S.schedules.find((x) => x.id === s.id), it); else S.schedules.push({ ...it, id: uid() });
       save(); closeSheets(); toast('저장했어요'); render();
@@ -604,6 +654,13 @@
         <label class="full">말할 때 부르는 이름 (쉼표로 구분)<input type="text" name="aliases" value="${esc((it.aliases || []).join(', '))}" placeholder="예) 딥드림, 신한"></label>
         <label>색<input type="color" name="color" value="${esc(it.color)}" style="min-height:44px;padding:4px"></label>
         <label>결제일 (알림)<select name="payDay"><option value="">없음</option>${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}" ${(linked ? linked.day : it.payDay) === i + 1 ? 'selected' : ''}>${i + 1}일</option>`).join('')}</select></label>
+        <label>이용한도<input type="number" inputmode="numeric" name="limit" value="${it.limit || ''}" placeholder="0"></label>
+        <label>한도 사용액<input type="number" inputmode="numeric" name="limitUsed" value="${it.limitUsed || ''}" placeholder="0"></label>
+        <label>총 사용금액<input type="number" inputmode="numeric" name="usage" value="${it.usage || ''}" placeholder="0"></label>
+        <label>기준일<input type="date" name="asOf" value="${it.asOf || today()}"></label>
+        <label>카드금융 종류<input type="text" name="loanType" value="${esc(it.loanType || '')}" placeholder="현금서비스, 장기카드대출"></label>
+        <label>카드금융 금액<input type="number" inputmode="numeric" name="loanAmt" value="${it.loanAmt || ''}" placeholder="0"></label>
+        <label>금리(%)<input type="number" inputmode="decimal" step="0.1" name="rate" value="${it.rate || ''}" placeholder="0"></label>
         <label class="full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="def" ${S.settings.defaultCardId === it.id && it.id ? 'checked' : ''} style="width:22px;height:22px;min-height:0"> 카드를 말 안 하면 이 카드로 기록</label>
       </div>
       <div class="sheet-actions">${c ? '<button class="btn danger" id="delC">삭제</button>' : ''}<button class="btn primary" id="saveC">저장</button></div>`;
@@ -613,6 +670,8 @@
       it.name = g('name').value.trim(); if (!it.name) { toast('이름을 입력해 주세요'); return; }
       it.aliases = g('aliases').value.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
       it.color = g('color').value; it.payDay = +g('payDay').value || null;
+      for (const k of ['limit', 'limitUsed', 'usage', 'loanAmt']) it[k] = Math.round(+g(k).value || 0);
+      it.rate = +g('rate').value || 0; it.loanType = g('loanType').value.trim(); it.asOf = g('asOf').value;
       if (!c) { it.id = uid(); S.cards.push(it); } else Object.assign(cardById(c.id), it);
       if (g('def').checked) S.settings.defaultCardId = it.id; else if (S.settings.defaultCardId === it.id) S.settings.defaultCardId = null;
       // 결제일 → 고정지출(카드 결제일) 자동 연결
@@ -662,7 +721,7 @@
       for (const n of o.s.remind || []) {
         const [h, mi] = (o.s.time || '09:00').split(':').map(Number);
         const at = addDays(parseD(o.date), -n); at.setHours(h, mi, 0, 0);
-        out.push({ key: `${o.key}|${n}`, at: at.getTime(), title: `${KINDS[o.s.kind]?.icon || '📌'} ${o.s.name} ${n === 0 ? '오늘이에요' : n + '일 남았어요'}`, body: `${+o.date.slice(5, 7)}월 ${+o.date.slice(8)}일 · ${o.estimated ? '약 ' : ''}${won(o.amount)}${o.s.cardId ? ' · ' + cardName(o.s.cardId) : ''}` });
+        out.push({ key: `${o.key}|${n}`, at: at.getTime(), title: `${KINDS[o.s.kind]?.icon || '📌'} ${o.s.name} ${n === 0 ? '오늘이에요' : n + '일 남았어요'}`, body: `${+o.date.slice(5, 7)}월 ${+o.date.slice(8)}일 · ${occText(o)}${o.s.cardId ? ' · ' + cardName(o.s.cardId) : ''}` });
       }
     }
     for (const e of plannedEntries(from, to)) {
@@ -748,12 +807,25 @@
     rd.onload = () => {
       try {
         const d = JSON.parse(rd.result);
+        if (d.merge) { mergeImport(d); return; }
         if (!Array.isArray(d.entries)) throw new Error('형식 오류');
         if (!confirm(`기록 ${d.entries.length}건을 불러올까요? 지금 기록은 바뀌어요.`)) return;
         S = Object.assign(blank(), d); save(); toast('불러왔어요'); render();
       } catch (e) { toast('백업 파일을 읽을 수 없어요'); }
     };
     rd.readAsText(f);
+  }
+  // 기존 기록은 그대로 두고 카드·고정지출·기록을 더함 (같은 항목은 새 값으로 바꿈)
+  function mergeImport(d) {
+    const cards = d.cards || [], scheds = d.schedules || [], ents = d.entries || [];
+    if (!confirm(`${d.title || '가져오기'}\n카드 ${cards.length}개, 고정지출 ${scheds.length}건${ents.length ? `, 기록 ${ents.length}건` : ''}을 넣을까요?\n지금 기록은 그대로 둬요.`)) return;
+    for (const c of cards) { const ex = cardById(c.id); if (ex) Object.assign(ex, c); else S.cards.push({ aliases: [], color: '#8d6e63', ...c }); }
+    for (const x of scheds) {
+      S.schedules = S.schedules.filter((y) => y.id !== x.id && !(x.kind === 'card' && y.kind === 'card' && y.cardId === x.cardId));
+      S.schedules.push({ remind: [3, 1, 0], time: '09:00', active: true, ...x });
+    }
+    for (const e of ents) if (!S.entries.some((y) => y.id === e.id)) S.entries.push(e);
+    save(); toast('넣었어요'); ui.tab = 'schedule'; render();
   }
   function loadDemo() {
     const n = new Date();
